@@ -1,10 +1,13 @@
 """
 Skin Analysis Module
 Extracts dominant skin color using K-Means clustering and classifies
-the undertone as warm, cool, or neutral.
+the undertone as warm, cool, or neutral. Includes ITA angle classification,
+skin health indicators, and color harmony recommendations.
 """
 
+import math
 import numpy as np
+import cv2
 from sklearn.cluster import KMeans
 
 
@@ -29,15 +32,17 @@ class SkinAnalyzer:
     def __init__(self):
         pass
 
-    def analyze(self, skin_pixels: list) -> dict:
+    def analyze(self, skin_pixels: list, region_pixels: dict = None) -> dict:
         """
         Analyze skin pixels to determine skin tone and undertone.
 
         Args:
             skin_pixels: List of [B, G, R] pixel values from face regions
+            region_pixels: Optional dict with left_cheek, right_cheek, forehead pixel lists
 
         Returns:
-            dict with hex_color, shade_name, undertone, confidence
+            dict with hex_color, shade_name, undertone, confidence,
+            ita_angle, ita_category, skin_health_indicators, color_harmony
         """
         if not skin_pixels or len(skin_pixels) < 10:
             return {"error": "Not enough skin pixels to analyze. Please try a clearer photo."}
@@ -67,6 +72,15 @@ class SkinAnalyzer:
         # Step 5: Convert to hex
         hex_color = "#{:02x}{:02x}{:02x}".format(int(r), int(g), int(b))
 
+        # Step 6: ITA angle calculation
+        ita_angle, ita_category = self._compute_ita(dominant_color)
+
+        # Step 7: Skin health indicators
+        skin_health = self._compute_skin_health(region_pixels)
+
+        # Step 8: Color harmony recommendations
+        color_harmony = self._compute_color_harmony(undertone["type"])
+
         return {
             "hex_color": hex_color,
             "rgb": {"r": int(r), "g": int(g), "b": int(b)},
@@ -75,7 +89,11 @@ class SkinAnalyzer:
             "undertone": undertone["type"],
             "undertone_description": undertone["description"],
             "luminance": round(float(luminance), 1),
-            "confidence": round(undertone["confidence"], 2)
+            "confidence": round(undertone["confidence"], 2),
+            "ita_angle": ita_angle,
+            "ita_category": ita_category,
+            "skin_health_indicators": skin_health,
+            "color_harmony": color_harmony,
         }
 
     def _filter_skin_pixels(self, pixels: np.ndarray) -> np.ndarray:
@@ -85,8 +103,6 @@ class SkinAnalyzer:
         """
         # Convert BGR to HSV for better skin detection
         # Reshape for OpenCV conversion
-        import cv2
-
         pixel_img = pixels.reshape(1, -1, 3).astype(np.uint8)
         hsv = cv2.cvtColor(pixel_img, cv2.COLOR_BGR2HSV).reshape(-1, 3)
 
@@ -188,3 +204,139 @@ class SkinAnalyzer:
             "description": description,
             "confidence": confidence
         }
+
+    def _compute_ita(self, dominant_bgr: tuple) -> tuple:
+        """
+        Compute Individual Typology Angle (ITA) from dominant BGR color.
+        ITA = atan2(L - 50, b) * (180 / pi) where L, b are from CIE-LAB.
+        """
+        pixel = np.array([[[dominant_bgr[0], dominant_bgr[1], dominant_bgr[2]]]], dtype=np.uint8)
+        lab = cv2.cvtColor(pixel, cv2.COLOR_BGR2LAB)
+        L_raw, _, b_raw = lab[0][0].astype(float)
+        # Convert OpenCV LAB to standard LAB
+        L = L_raw * 100.0 / 255.0
+        b = b_raw - 128.0
+
+        if abs(b) < 1e-6:
+            b = 1e-6
+        ita_angle = math.atan2(L - 50, b) * (180.0 / math.pi)
+        ita_angle = round(ita_angle, 2)
+
+        if ita_angle > 55:
+            category = "Very Light"
+        elif ita_angle > 41:
+            category = "Light"
+        elif ita_angle > 28:
+            category = "Intermediate"
+        elif ita_angle > 10:
+            category = "Tan"
+        elif ita_angle > -30:
+            category = "Brown"
+        else:
+            category = "Dark"
+
+        return ita_angle, category
+
+    def _compute_skin_health(self, region_pixels: dict = None) -> dict:
+        """
+        Compute skin health indicators from regional pixel data.
+        """
+        if not region_pixels:
+            return {
+                "hydration_estimate": "moderate",
+                "evenness_score": 75,
+                "tip": "Upload a clear, well-lit selfie for more accurate skin health analysis.",
+            }
+
+        # Collect per-region stats
+        region_means = []
+        all_sat_vars = []
+
+        for region_name in ["forehead", "left_cheek", "right_cheek"]:
+            pixels = region_pixels.get(region_name, [])
+            if not pixels or len(pixels) < 3:
+                continue
+
+            arr = np.array(pixels, dtype=np.uint8).reshape(1, -1, 3)
+            hsv = cv2.cvtColor(arr, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+            lab = cv2.cvtColor(arr, cv2.COLOR_BGR2LAB).reshape(-1, 3)
+
+            sat_var = float(np.var(hsv[:, 1]))
+            all_sat_vars.append(sat_var)
+
+            region_means.append(lab.mean(axis=0))
+
+        # Hydration estimate based on saturation variance
+        avg_sat_var = float(np.mean(all_sat_vars)) if all_sat_vars else 500.0
+        if avg_sat_var < 300:
+            hydration = "good"
+        elif avg_sat_var < 800:
+            hydration = "moderate"
+        else:
+            hydration = "low"
+
+        # Evenness score based on color standard deviation across regions
+        if len(region_means) >= 2:
+            region_arr = np.array(region_means, dtype=float)
+            color_std = float(np.mean(np.std(region_arr, axis=0)))
+            evenness = max(0, min(100, int(100 - color_std * 2.5)))
+        else:
+            evenness = 75
+
+        # Contextual tip
+        if hydration == "low" and evenness < 50:
+            tip = "Your skin appears a bit dry and uneven. Consider a hydrating primer and color-correcting concealer."
+        elif hydration == "low":
+            tip = "Your skin could use more hydration. Try a moisturizing primer or dewy foundation."
+        elif evenness < 50:
+            tip = "Your skin tone varies across regions. A color-correcting primer can help even things out."
+        elif hydration == "good" and evenness >= 80:
+            tip = "Your skin looks well-hydrated and even — a great canvas for any makeup look!"
+        else:
+            tip = "Your skin is in good shape. A lightweight foundation will enhance your natural glow."
+
+        return {
+            "hydration_estimate": hydration,
+            "evenness_score": evenness,
+            "tip": tip,
+        }
+
+    def _compute_color_harmony(self, undertone: str) -> dict:
+        """
+        Generate color harmony recommendations based on undertone.
+        Uses color theory: warm undertones pair with earth tones,
+        cool with jewel tones, neutral with both.
+        """
+        warm_clothing = ["#C8553D", "#E8985E", "#D4A574", "#8B6914", "#A0522D", "#CC7722"]
+        cool_clothing = ["#4B0082", "#2E4057", "#800020", "#008080", "#483D8B", "#4169E1"]
+        neutral_clothing = ["#556B2F", "#8B4513", "#4682B4", "#708090", "#9370DB", "#CD853F"]
+
+        warm_lips = ["#C04000", "#CC5533", "#B5651D", "#A0522D"]
+        cool_lips = ["#C71585", "#DC143C", "#8B0000", "#B22222"]
+        neutral_lips = ["#BC544B", "#CD5C5C", "#C04040", "#A52A2A"]
+
+        warm_avoid = ["#C0C0C0", "#4169E1", "#FF69B4"]
+        cool_avoid = ["#FF8C00", "#DAA520", "#CD853F"]
+        neutral_avoid = ["#FF4500", "#00FF00", "#FF00FF"]
+
+        if undertone in ("warm", "neutral-warm"):
+            return {
+                "best_clothing_colors": warm_clothing,
+                "best_jewelry": "gold",
+                "best_lip_colors": warm_lips,
+                "avoid_colors": warm_avoid,
+            }
+        elif undertone in ("cool", "neutral-cool"):
+            return {
+                "best_clothing_colors": cool_clothing,
+                "best_jewelry": "silver",
+                "best_lip_colors": cool_lips,
+                "avoid_colors": cool_avoid,
+            }
+        else:
+            return {
+                "best_clothing_colors": neutral_clothing,
+                "best_jewelry": "all",
+                "best_lip_colors": neutral_lips,
+                "avoid_colors": neutral_avoid,
+            }

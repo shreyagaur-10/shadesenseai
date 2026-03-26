@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Hero from './components/Hero'
 import ImageUpload from './components/ImageUpload'
 import TextInput from './components/TextInput'
 import Results from './components/Results'
 import LoadingSpinner from './components/LoadingSpinner'
+import VirtualTryOn from './components/VirtualTryOn'
 
 // API URL — uses proxy in dev, direct URL in production
 const API_URL = import.meta.env.PROD
@@ -11,6 +12,14 @@ const API_URL = import.meta.env.PROD
   : ''
 
 function App() {
+  const [darkMode, setDarkMode] = useState(() => {
+    try { return localStorage.getItem('darkMode') === 'true' } catch { return false }
+  })
+
+  useEffect(() => {
+    try { localStorage.setItem('darkMode', darkMode) } catch {}
+  }, [darkMode])
+
   const [image, setImage] = useState(null)         // File object
   const [imagePreview, setImagePreview] = useState(null) // base64 preview
   const [text, setText] = useState('')
@@ -18,10 +27,19 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
+  // Party mode (multi-face)
+  const [partyMode, setPartyMode] = useState(false)
+  const [multiFaces, setMultiFaces] = useState(null)
+  const [activeFaceIndex, setActiveFaceIndex] = useState(0)
+
+  // Virtual try-on
+  const [tryOnProduct, setTryOnProduct] = useState(null)
+
   const handleImageSelect = (file) => {
     setImage(file)
     setError(null)
     setResults(null)
+    setMultiFaces(null)
 
     // Create preview
     const reader = new FileReader()
@@ -33,6 +51,7 @@ function App() {
     setImage(null)
     setImagePreview(null)
     setResults(null)
+    setMultiFaces(null)
     setError(null)
   }
 
@@ -45,13 +64,16 @@ function App() {
     setLoading(true)
     setError(null)
     setResults(null)
+    setMultiFaces(null)
+    setActiveFaceIndex(0)
 
     try {
       const formData = new FormData()
       formData.append('image', image)
       formData.append('text', text)
 
-      const response = await fetch(`${API_URL}/api/analyze`, {
+      const endpoint = partyMode ? '/api/analyze-multi' : '/api/analyze'
+      const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         body: formData,
       })
@@ -63,7 +85,12 @@ function App() {
       }
 
       if (data.success) {
-        setResults(data)
+        if (partyMode && data.faces) {
+          setMultiFaces(data.faces)
+          setResults(data.faces[0])
+        } else {
+          setResults(data)
+        }
       } else {
         setError(data.error || 'Analysis failed. Please try a clearer photo.')
       }
@@ -79,8 +106,25 @@ function App() {
     }
   }
 
+  const handleTryOn = (product) => {
+    setTryOnProduct(product)
+  }
+
+  const activeResults = multiFaces ? multiFaces[activeFaceIndex] : results
+
   return (
-    <div className="min-h-screen bg-cream">
+    <div className={`min-h-screen bg-cream ${darkMode ? 'dark' : ''}`}>
+      {/* Dark Mode Toggle */}
+      <button
+        onClick={() => setDarkMode(!darkMode)}
+        className="fixed top-4 right-4 z-50 w-10 h-10 rounded-full glass
+          flex items-center justify-center text-xl
+          hover:scale-110 transition-all duration-200 cursor-pointer shadow-md"
+        aria-label="Toggle dark mode"
+      >
+        {darkMode ? '☀️' : '🌙'}
+      </button>
+
       {/* Hero Section */}
       <Hero />
 
@@ -103,6 +147,32 @@ function App() {
                   onClear={handleClearImage}
                   preview={imagePreview}
                 />
+
+                {/* Party Mode Toggle */}
+                <div className="mt-4 flex items-center gap-3 p-3 rounded-xl bg-cream/60">
+                  <button
+                    onClick={() => setPartyMode(!partyMode)}
+                    className={`relative w-12 h-7 rounded-full transition-all duration-300 cursor-pointer flex-shrink-0 ${
+                      partyMode
+                        ? 'bg-gradient-to-r from-blush to-rose'
+                        : 'bg-charcoal-light/20'
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow-md transition-all duration-300 ${
+                        partyMode ? 'left-5.5' : 'left-0.5'
+                      }`}
+                    />
+                  </button>
+                  <div>
+                    <p className="text-sm font-medium text-charcoal">
+                      👥 Party Mode (Multi-Face)
+                    </p>
+                    <p className="text-xs text-charcoal-light">
+                      Detect & analyze multiple faces in one photo
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Right: Text Input + Analyze Button */}
@@ -154,13 +224,57 @@ function App() {
         {/* Loading State */}
         {loading && <LoadingSpinner />}
 
+        {/* Multi-Face Selector */}
+        {multiFaces && multiFaces.length > 1 && !loading && (
+          <div className="mt-8 animate-fade-in-up">
+            <div className="glass rounded-2xl p-4">
+              <p className="text-sm font-medium text-charcoal mb-3">
+                👥 {multiFaces.length} faces detected — select one:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {multiFaces.map((face, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setActiveFaceIndex(i)}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 cursor-pointer
+                      flex items-center gap-2
+                      ${activeFaceIndex === i
+                        ? 'bg-gradient-to-r from-blush to-rose text-white shadow-md'
+                        : 'bg-cream text-charcoal-light hover:text-charcoal hover:shadow-sm'
+                      }`}
+                  >
+                    <div
+                      className="w-5 h-5 rounded-full border-2 border-white shadow-sm"
+                      style={{ backgroundColor: face.skin_analysis?.hex_color || '#ccc' }}
+                    />
+                    Face {i + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Results */}
-        {results && !loading && (
+        {activeResults && !loading && (
           <div className="mt-12 animate-fade-in-up">
-            <Results data={results} />
+            <Results
+              data={activeResults}
+              imageFile={image}
+              onTryOn={handleTryOn}
+            />
           </div>
         )}
       </main>
+
+      {/* Virtual Try-On Modal */}
+      {tryOnProduct && image && (
+        <VirtualTryOn
+          imageFile={image}
+          product={tryOnProduct}
+          onClose={() => setTryOnProduct(null)}
+        />
+      )}
 
       {/* Footer */}
       <footer className="text-center py-8 text-charcoal-light text-sm">

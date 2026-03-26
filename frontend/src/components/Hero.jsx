@@ -1,3 +1,32 @@
+import { useState, useEffect, useRef } from 'react'
+
+function AnimatedCounter({ target, suffix = '' }) {
+  const [count, setCount] = useState(0)
+  const ref = useRef(null)
+  const started = useRef(false)
+
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    const duration = 1500
+    const start = performance.now()
+
+    const animate = (now) => {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      // ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setCount(Math.round(eased * target))
+      if (progress < 1) requestAnimationFrame(animate)
+    }
+    requestAnimationFrame(animate)
+  }, [target])
+
+  return (
+    <span>{count}{suffix}</span>
+  )
+}
+
 export default function Hero() {
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-cream via-blush-light to-cream-dark">
@@ -51,6 +80,28 @@ export default function Hero() {
           <span className="flex items-center gap-1.5">
             <span className="text-lg">🎯</span> Real Products
           </span>
+        </div>
+
+        {/* Animated Stats */}
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-10 animate-fade-in-up stagger-5">
+          <div className="text-center">
+            <p className="text-3xl sm:text-4xl font-bold text-charcoal font-serif">
+              <AnimatedCounter target={50} suffix="+" />
+            </p>
+            <p className="text-xs text-charcoal-light mt-1">Product Shades Analyzed</p>
+          </div>
+          <div className="text-center">
+            <p className="text-3xl sm:text-4xl font-bold text-charcoal font-serif">
+              <AnimatedCounter target={12} />
+            </p>
+            <p className="text-xs text-charcoal-light mt-1">Skin Tone Categories</p>
+          </div>
+          <div className="text-center">
+            <p className="text-3xl sm:text-4xl font-bold text-charcoal font-serif">
+              <AnimatedCounter target={4} />
+            </p>
+            <p className="text-xs text-charcoal-light mt-1">Product Categories</p>
+          </div>
         </div>
       </div>
     </section>

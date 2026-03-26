@@ -16,7 +16,8 @@ class Recommender:
         with open(data_path, "r", encoding="utf-8") as f:
             self.products = json.load(f)
 
-    def recommend(self, skin_data: dict, intent: dict, top_n: int = 5) -> List[dict]:
+    def recommend(self, skin_data: dict, intent: dict, top_n: int = 5,
+                  product_type: str = "foundation") -> List[dict]:
         """
         Find the best matching products.
 
@@ -25,6 +26,7 @@ class Recommender:
                        Contains: hex_color, luminance, undertone, shade_name
             intent: Output from IntentParser.parse()
                     Contains: occasion, look, coverage, finish
+            product_type: Filter by product type (default "foundation")
 
         Returns:
             List of top N product matches with scores
@@ -34,7 +36,12 @@ class Recommender:
 
         scored_products = []
 
-        for product in self.products:
+        filtered_products = [
+            p for p in self.products
+            if p.get("type", "foundation") == product_type
+        ]
+
+        for product in filtered_products:
             score = self._score_product(product, luminance, undertone, intent)
             if score > 0:
                 scored_products.append({
@@ -48,13 +55,15 @@ class Recommender:
         # Return top N
         results = scored_products[:top_n]
 
-        # Add match percentage (normalize to 0-100)
+        # Add match percentage (normalize to 0-100) and ensure type is present
         if results:
             max_score = results[0]["match_score"]
             for product in results:
                 product["match_percentage"] = round(
                     (product["match_score"] / max_score) * 100
                 ) if max_score > 0 else 0
+                if "type" not in product:
+                    product["type"] = product_type
 
         return results
 

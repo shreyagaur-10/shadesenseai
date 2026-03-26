@@ -1,108 +1,132 @@
 """
 Face Detection Module
-Uses MediaPipe to detect faces and extract skin regions (cheeks + forehead)
-for skin tone analysis.
+Uses OpenCV's Haar Cascade (haarcascade_frontalface_alt2 + profileface)
+to detect faces and extract skin regions (cheeks + forehead) for skin tone analysis.
 """
 
 import cv2
 import numpy as np
-import mediapipe as mp
 
 
 class FaceDetector:
     def __init__(self):
-        """Initialize MediaPipe Face Detection + Face Mesh for landmarks."""
-        self.mp_face_detection = mp.solutions.face_detection
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_detection = self.mp_face_detection.FaceDetection(
-            model_selection=1,  # Full-range model (better for varied distances)
-            min_detection_confidence=0.5
+        """Initialize OpenCV Haar Cascade face detectors."""
+        self.face_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
         )
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=True,
-            max_num_faces=1,
-            min_detection_confidence=0.5
+        self.profile_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_profileface.xml"
         )
 
-    def detect_face(self, image: np.ndarray) -> dict:
+    def detect_face(self, image: np.ndarray, multi_face: bool = False):
         """
-        Detect face in image and extract skin regions.
+        Detect face(s) in image and extract skin regions.
 
         Args:
             image: BGR image as numpy array
+            multi_face: if True, return results for ALL detected faces
 
         Returns:
-            dict with face_bbox, skin_regions, or error
+            When multi_face=False: dict with face_bbox, skin_regions, or error
+            When multi_face=True: list of dicts (one per face), or dict with error
         """
         h, w, _ = image.shape
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Step 1: Detect faces
-        detection_results = self.face_detection.process(rgb_image)
+        # Primary detection with frontal face cascade
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(80, 80),
+        )
 
-        if not detection_results.detections:
+        # Second-pass with profile face cascade for side profiles
+        if len(faces) == 0:
+            faces = self.profile_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(80, 80),
+            )
+
+        if len(faces) == 0:
             return {"error": "No face detected. Please upload a clear selfie with good lighting."}
 
-        if len(detection_results.detections) > 1:
-            return {"error": "Multiple faces detected. Please upload a photo with only one face."}
+        faces = list(faces)
 
-        # Step 2: Get face bounding box
-        detection = detection_results.detections[0]
-        bbox = detection.location_data.relative_bounding_box
+        if multi_face:
+            results = []
+            for fx, fy, fw, fh in faces:
+                face_bbox = {
+                    "x": int(fx),
+                    "y": int(fy),
+                    "width": int(fw),
+                    "height": int(fh),
+                }
+                skin_regions = self._extract_skin_regions(image, fx, fy, fw, fh)
+                results.append({
+                    "face_bbox": face_bbox,
+                    "skin_regions": skin_regions,
+                    "confidence": 0.85,
+                })
+            return results
+
+        # Single-face mode: pick the largest face
+        if len(faces) > 1:
+            areas = [fw * fh for (_, _, fw, fh) in faces]
+            faces = [faces[np.argmax(areas)]]
+
+        fx, fy, fw, fh = faces[0]
+
         face_bbox = {
-            "x": int(bbox.xmin * w),
-            "y": int(bbox.ymin * h),
-            "width": int(bbox.width * w),
-            "height": int(bbox.height * h)
+            "x": int(fx),
+            "y": int(fy),
+            "width": int(fw),
+            "height": int(fh),
         }
 
-        # Step 3: Use Face Mesh to get precise skin regions
-        mesh_results = self.face_mesh.process(rgb_image)
-
-        if not mesh_results.multi_face_landmarks:
-            return {"error": "Could not analyze facial features. Please try a clearer photo."}
-
-        landmarks = mesh_results.multi_face_landmarks[0]
-
-        # Extract skin sampling regions (cheeks + forehead)
-        skin_regions = self._extract_skin_regions(image, landmarks, w, h)
+        skin_regions = self._extract_skin_regions(image, fx, fy, fw, fh)
 
         return {
             "face_bbox": face_bbox,
             "skin_regions": skin_regions,
-            "confidence": detection.score[0]
+            "confidence": 0.85,
         }
 
-    def _extract_skin_regions(self, image: np.ndarray, landmarks, w: int, h: int) -> dict:
+    def _extract_skin_regions(self, image: np.ndarray, fx: int, fy: int, fw: int, fh: int) -> dict:
         """
-        Extract skin pixel samples from cheek and forehead regions using face landmarks.
-        These regions typically have the most representative skin color.
+        Extract skin pixel samples from cheek and forehead regions
+        using geometric approximations within the detected face bbox.
+        """
+        h, w = image.shape[:2]
+        radius = max(5, int(fw * 0.04))
 
-        MediaPipe Face Mesh landmark indices:
-        - Left cheek area: around landmarks 234, 93, 132
-        - Right cheek area: around landmarks 454, 323, 361
-        - Forehead area: around landmarks 10, 338, 297, 67, 109
-        """
+        # Approximate landmark positions relative to face bbox
+        sample_points = {
+            "left_cheek": [
+                (fx + int(fw * 0.25), fy + int(fh * 0.55)),
+                (fx + int(fw * 0.20), fy + int(fh * 0.50)),
+                (fx + int(fw * 0.30), fy + int(fh * 0.60)),
+            ],
+            "right_cheek": [
+                (fx + int(fw * 0.75), fy + int(fh * 0.55)),
+                (fx + int(fw * 0.80), fy + int(fh * 0.50)),
+                (fx + int(fw * 0.70), fy + int(fh * 0.60)),
+            ],
+            "forehead": [
+                (fx + int(fw * 0.50), fy + int(fh * 0.15)),
+                (fx + int(fw * 0.40), fy + int(fh * 0.18)),
+                (fx + int(fw * 0.60), fy + int(fh * 0.18)),
+            ],
+        }
+
         skin_pixels = []
-
-        # Region definitions: (center_landmark_idx, sample_radius_ratio)
-        # We sample a small square around each landmark point
-        regions = {
-            "left_cheek": [234, 93, 132, 147, 187],
-            "right_cheek": [454, 323, 361, 376, 411],
-            "forehead": [10, 338, 297, 67, 109, 151]
-        }
-
         region_pixels = {}
 
-        for region_name, landmark_indices in regions.items():
+        for region_name, points in sample_points.items():
             region_px = []
-            for idx in landmark_indices:
-                lm = landmarks.landmark[idx]
-                cx, cy = int(lm.x * w), int(lm.y * h)
-
-                # Sample a 10x10 pixel area around the landmark
-                radius = 5
+            for cx, cy in points:
                 y_start = max(0, cy - radius)
                 y_end = min(h, cy + radius)
                 x_start = max(0, cx - radius)
@@ -119,10 +143,5 @@ class FaceDetector:
         return {
             "all_pixels": skin_pixels,
             "regions": region_pixels,
-            "total_samples": len(skin_pixels)
+            "total_samples": len(skin_pixels),
         }
-
-    def __del__(self):
-        """Clean up MediaPipe resources."""
-        self.face_detection.close()
-        self.face_mesh.close()
