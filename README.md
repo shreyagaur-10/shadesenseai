@@ -233,29 +233,6 @@ Images are 200×200 px cropped faces with filename encoding: `[age]_[gender]_[ra
 | **Frontend** | React 18, Vite 6, Tailwind CSS 4 |
 | **Deployment** | Render (backend), Vercel (frontend) |
 
----
-
-## 🚢 Deployment
-
-### Backend (Render)
-
-The `render.yaml` is pre-configured:
-
-```bash
-# Deployed via Render dashboard or CLI
-# Start command: uvicorn main:app --host 0.0.0.0 --port $PORT
-```
-
-### Frontend (Vercel)
-
-```bash
-cd frontend
-npm run build
-# Deploy dist/ to Vercel
-# Set VITE_API_URL env var to your Render backend URL
-```
-
----
 
 ## 🤝 Contributing
 
