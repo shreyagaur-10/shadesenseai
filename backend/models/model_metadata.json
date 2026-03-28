@@ -1,0 +1,12 @@
+{
+  "model_type": "SVM",
+  "accuracy": 0.7133333333333334,
+  "cv_accuracy": 0.6953333333333334,
+  "classes": [
+    "Black",
+    "Brown",
+    "White"
+  ],
+  "feature_count": 39,
+  "training_samples": 1500
+}

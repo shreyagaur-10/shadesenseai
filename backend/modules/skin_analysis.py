@@ -9,6 +9,7 @@ import math
 import numpy as np
 import cv2
 from sklearn.cluster import KMeans
+from modules.skin_tone_model import SkinToneClassifier
 
 
 # Shade name mapping — covers the full range of Indian/South Asian skin tones
@@ -30,7 +31,7 @@ SHADE_RANGES = [
 
 class SkinAnalyzer:
     def __init__(self):
-        pass
+        self.tone_classifier = SkinToneClassifier()
 
     def analyze(self, skin_pixels: list, region_pixels: dict = None) -> dict:
         """
@@ -81,7 +82,19 @@ class SkinAnalyzer:
         # Step 8: Color harmony recommendations
         color_harmony = self._compute_color_harmony(undertone["type"])
 
-        return {
+        # Step 9: ML-based skin tone classification
+        ml_prediction = self.tone_classifier.predict_from_pixels(
+            np.array(skin_pixels, dtype=np.float32)
+        )
+
+        # Use ML prediction to boost confidence when it agrees with rule-based
+        if ml_prediction:
+            tone_info = ml_prediction.get("tone_info", {})
+            ita_cats = tone_info.get("ita_categories", [])
+            if ita_category in ita_cats:
+                undertone["confidence"] = min(0.97, undertone["confidence"] + 0.1)
+
+        result = {
             "hex_color": hex_color,
             "rgb": {"r": int(r), "g": int(g), "b": int(b)},
             "shade_name": shade_info["name"],
@@ -95,6 +108,15 @@ class SkinAnalyzer:
             "skin_health_indicators": skin_health,
             "color_harmony": color_harmony,
         }
+
+        if ml_prediction:
+            result["ml_skin_tone"] = {
+                "predicted_tone": ml_prediction["predicted_tone"],
+                "confidence": ml_prediction["confidence"],
+                "probabilities": ml_prediction["probabilities"],
+            }
+
+        return result
 
     def _filter_skin_pixels(self, pixels: np.ndarray) -> np.ndarray:
         """

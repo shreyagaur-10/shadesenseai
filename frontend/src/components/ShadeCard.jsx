@@ -1,5 +1,5 @@
 export default function ShadeCard({ skinAnalysis }) {
-  const { hex_color, shade_name, shade_code, undertone, undertone_description, confidence } = skinAnalysis
+  const { hex_color, shade_name, shade_code, undertone, undertone_description, confidence, ml_skin_tone } = skinAnalysis
 
   // Determine undertone badge color
   const undertoneColors = {
@@ -51,6 +51,38 @@ export default function ShadeCard({ skinAnalysis }) {
           </p>
         </div>
       </div>
+
+      {/* ML Skin Tone Prediction */}
+      {ml_skin_tone && (
+        <div className="mt-6 pt-4 border-t border-blush/20">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm">🤖</span>
+            <span className="text-xs font-semibold text-charcoal">AI Skin Tone Analysis</span>
+            <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700">
+              {ml_skin_tone.predicted_tone}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            {Object.entries(ml_skin_tone.probabilities || {}).map(([tone, prob]) => (
+              <div key={tone} className="flex-1">
+                <div className="flex items-center justify-between text-xs text-charcoal-light mb-1">
+                  <span>{tone}</span>
+                  <span>{Math.round(prob * 100)}%</span>
+                </div>
+                <div className="h-1.5 bg-blush-light/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-1000"
+                    style={{
+                      width: `${Math.round(prob * 100)}%`,
+                      backgroundColor: tone === ml_skin_tone.predicted_tone ? '#8b5cf6' : '#d4a5a5',
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Confidence Bar */}
       <div className="mt-6 pt-4 border-t border-blush/20">

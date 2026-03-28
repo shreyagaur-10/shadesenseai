@@ -106,12 +106,19 @@ async def _read_image(image: UploadFile):
 
 def _build_single_result(img, text, product_type):
     """Run the full analysis pipeline for a single face and return a response dict."""
-    img = normalize_lighting(img)
-
+    # Detect face before lighting normalization (normalization can break detection)
     face_result = face_detector.detect_face(img)
-
     if "error" in face_result:
         return {"success": False, "error": face_result["error"]}
+
+    # Now normalize lighting for better skin color extraction
+    img = normalize_lighting(img)
+    # Re-extract skin regions from normalized image using the same face bbox
+    fx = face_result["face_bbox"]["x"]
+    fy = face_result["face_bbox"]["y"]
+    fw = face_result["face_bbox"]["width"]
+    fh = face_result["face_bbox"]["height"]
+    face_result["skin_regions"] = face_detector._extract_skin_regions(img, fx, fy, fw, fh)
 
     skin_pixels = face_result["skin_regions"]["all_pixels"]
     region_pixels = face_result["skin_regions"]["regions"]
@@ -149,6 +156,7 @@ def _build_single_result(img, text, product_type):
             "ita_category": skin_data["ita_category"],
             "skin_health_indicators": skin_data["skin_health_indicators"],
             "color_harmony": skin_data["color_harmony"],
+            "ml_skin_tone": skin_data.get("ml_skin_tone"),
         },
         "intent": {
             "occasion": intent["occasion"],
@@ -233,7 +241,6 @@ async def analyze_multi(
     """
     try:
         img = await _read_image(image)
-        img = normalize_lighting(img)
 
         face_results = face_detector.detect_face(img, multi_face=True)
 
